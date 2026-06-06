@@ -35,17 +35,22 @@ log = logging.getLogger(__name__)
 
 
 def get_sheets_client():
-    google_creds = os.environ.get("GOOGLE_CREDENTIALS")
-    if google_creds:
-        google_creds = google_creds.strip()
-        if google_creds.startswith('"') and google_creds.endswith('"'):
-            google_creds = google_creds[1:-1]
-        google_creds = google_creds.replace('\\"', '"')
-        creds_dict = json.loads(google_creds)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    else:
-        creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
-    return gspread.authorize(creds)
+    import base64
+    # 1. Base64 usuli (eng ishonchli)
+    b64 = os.environ.get("GOOGLE_CREDENTIALS_B64")
+    if b64:
+        creds_dict = json.loads(base64.b64decode(b64).decode())
+        return gspread.authorize(Credentials.from_service_account_info(creds_dict, scopes=SCOPES))
+    # 2. JSON string usuli
+    raw = os.environ.get("GOOGLE_CREDENTIALS")
+    if raw:
+        raw = raw.strip().replace('\\"', '"')
+        if raw.startswith('"') and raw.endswith('"'):
+            raw = raw[1:-1]
+        creds_dict = json.loads(raw)
+        return gspread.authorize(Credentials.from_service_account_info(creds_dict, scopes=SCOPES))
+    # 3. Lokal fayl
+    return gspread.authorize(Credentials.from_service_account_file("credentials.json", scopes=SCOPES))
 
 
 def get_or_create_sheet(spreadsheet, name, headers):
