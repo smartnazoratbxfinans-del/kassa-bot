@@ -1,5 +1,8 @@
 import asyncio
+import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -21,7 +24,6 @@ from google.oauth2.service_account import Credentials
 
 BOT_TOKEN = "8908059153:AAEuBbZPYmusgn8_VWu80uXkJagkXN58iE4"
 SPREADSHEET_ID = "1p8ODuCSlw75Engag5vndCqrtD0ucxxgxWo05BgwYYA8"
-CREDENTIALS_FILE = "credentials.json"
 ALLOWED_USERS: list[int] = []
 
 SCOPES = [
@@ -34,7 +36,14 @@ log = logging.getLogger(__name__)
 
 
 def get_sheets_client():
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+    # Railway da GOOGLE_CREDENTIALS env variable dan o'qiydi
+    # Lokal da credentials.json faylidan o'qiydi
+    google_creds = os.environ.get("GOOGLE_CREDENTIALS")
+    if google_creds:
+        creds_dict = json.loads(google_creds)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
     return gspread.authorize(creds)
 
 
@@ -56,7 +65,6 @@ def init_spreadsheet():
 
 
 def get_qoldiq():
-    """Joriy qoldiqni hisoblash"""
     try:
         client = get_sheets_client()
         sp = client.open_by_key(SPREADSHEET_ID)
@@ -173,8 +181,8 @@ async def cmd_start(msg: Message):
 async def cmd_yordam(msg: Message):
     await msg.answer(
         "📌 <b>Buyruqlar:</b>\n\n"
-        "➕ <b>Kirim</b> — kassa ga pul tushishi (sotuv, ish haqi olish...)\n"
-        "➖ <b>Chiqim</b> — kassadan pul chiqishi (xarajat, to'lov...)\n"
+        "➕ <b>Kirim</b> — kassa ga pul tushishi\n"
+        "➖ <b>Chiqim</b> — kassadan pul chiqishi\n"
         "💰 <b>Qoldiq</b> — joriy kassa qoldig'i\n"
         "📊 <b>Hisobot</b> — kunlik/oylik hisobot\n"
         "📦 <b>Inventar</b> — mahsulotlar boshqaruvi",
@@ -182,7 +190,6 @@ async def cmd_yordam(msg: Message):
     )
 
 
-# ─── QOLDIQ ───────────────────────────────────────────────────────────────────
 @router.message(F.text == "💰 Qoldiq")
 async def qoldiq_korish(msg: Message):
     if not check_user(msg.from_user.id):
@@ -197,7 +204,6 @@ async def qoldiq_korish(msg: Message):
         await msg.answer(f"❌ Xatolik: {e}")
 
 
-# ─── KIRIM ────────────────────────────────────────────────────────────────────
 @router.message(F.text == "➕ Kirim")
 async def kirim_boshlash(msg: Message, state: FSMContext):
     if not check_user(msg.from_user.id):
@@ -219,8 +225,7 @@ async def kirim_kategoriya(msg: Message, state: FSMContext):
     await state.update_data(kategoriya=msg.text.strip())
     await state.set_state(KirimStates.summa)
     await msg.answer(
-        f"✅ Kategoriya: <b>{msg.text.strip()}</b>\n\n"
-        f"💵 Kirim summasini kiriting (so'm):",
+        f"✅ Kategoriya: <b>{msg.text.strip()}</b>\n\n💵 Kirim summasini kiriting (so'm):",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML",
     )
@@ -251,27 +256,24 @@ async def kirim_izoh(msg: Message, state: FSMContext):
         client = get_sheets_client()
         sp = client.open_by_key(SPREADSHEET_ID)
         sheet = sp.worksheet("Operatsiyalar")
-        # Kirim musbat (+)
         summa = abs(data["summa"])
         qoldiq_old = get_qoldiq()
         yangi_qoldiq = qoldiq_old + summa
         sheet.append_row([sana, "Kirim", data["kategoriya"], summa, izoh, yangi_qoldiq, msg.from_user.full_name])
         await msg.answer(
             f"✅ <b>Kirim saqlandi!</b>\n\n"
-            f"📂 Kategoriya: {data['kategoriya']}\n"
+            f"📂 {data['kategoriya']}\n"
             f"💵 Summa: <b>+{summa:,.0f} so'm</b>\n"
             f"📝 Izoh: {izoh or '—'}\n"
-            f"🕒 Sana: {sana}\n\n"
+            f"🕒 {sana}\n\n"
             f"{qoldiq_emoji(yangi_qoldiq)} Qoldiq: <b>{yangi_qoldiq:,.0f} so'm</b>",
             reply_markup=MAIN_KB,
             parse_mode="HTML",
         )
     except Exception as e:
-        log.error("Sheets xatosi: %s", e)
         await msg.answer(f"❌ Xatolik: {e}", reply_markup=MAIN_KB)
 
 
-# ─── CHIQIM ───────────────────────────────────────────────────────────────────
 @router.message(F.text == "➖ Chiqim")
 async def chiqim_boshlash(msg: Message, state: FSMContext):
     if not check_user(msg.from_user.id):
@@ -285,8 +287,7 @@ async def chiqim_kategoriya(msg: Message, state: FSMContext):
     await state.update_data(kategoriya=msg.text.strip())
     await state.set_state(ChiqimStates.summa)
     await msg.answer(
-        f"✅ Kategoriya: <b>{msg.text.strip()}</b>\n\n"
-        f"💸 Chiqim summasini kiriting (so'm):",
+        f"✅ Kategoriya: <b>{msg.text.strip()}</b>\n\n💸 Chiqim summasini kiriting (so'm):",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML",
     )
@@ -317,27 +318,24 @@ async def chiqim_izoh(msg: Message, state: FSMContext):
         client = get_sheets_client()
         sp = client.open_by_key(SPREADSHEET_ID)
         sheet = sp.worksheet("Operatsiyalar")
-        # Chiqim manfiy (-)
         summa = -abs(data["summa"])
         qoldiq_old = get_qoldiq()
         yangi_qoldiq = qoldiq_old + summa
         sheet.append_row([sana, "Chiqim", data["kategoriya"], summa, izoh, yangi_qoldiq, msg.from_user.full_name])
         await msg.answer(
             f"✅ <b>Chiqim saqlandi!</b>\n\n"
-            f"📂 Kategoriya: {data['kategoriya']}\n"
+            f"📂 {data['kategoriya']}\n"
             f"💸 Summa: <b>{summa:,.0f} so'm</b>\n"
             f"📝 Izoh: {izoh or '—'}\n"
-            f"🕒 Sana: {sana}\n\n"
+            f"🕒 {sana}\n\n"
             f"{qoldiq_emoji(yangi_qoldiq)} Qoldiq: <b>{yangi_qoldiq:,.0f} so'm</b>",
             reply_markup=MAIN_KB,
             parse_mode="HTML",
         )
     except Exception as e:
-        log.error("Sheets xatosi: %s", e)
         await msg.answer(f"❌ Xatolik: {e}", reply_markup=MAIN_KB)
 
 
-# ─── INVENTAR ─────────────────────────────────────────────────────────────────
 @router.message(F.text == "📦 Inventar")
 async def inventar_menyu(msg: Message, state: FSMContext):
     if not check_user(msg.from_user.id):
@@ -448,7 +446,6 @@ async def inventar_izoh(msg: Message, state: FSMContext):
         await msg.answer(f"❌ Xatolik: {e}", reply_markup=MAIN_KB)
 
 
-# ─── HISOBOT ──────────────────────────────────────────────────────────────────
 @router.message(F.text == "📊 Hisobot")
 async def hisobot_menyu(msg: Message):
     if not check_user(msg.from_user.id):
@@ -476,16 +473,14 @@ async def hisobot_bugun(call: CallbackQuery):
         lines.append(f"➖ Chiqim: <b>{chiqim:,.0f} so'm</b>")
         lines.append(f"\n{qoldiq_emoji(qoldiq)} <b>Joriy qoldiq: {qoldiq:,.0f} so'm</b>")
         lines.append(f"📝 Operatsiyalar: {len(rows)} ta")
-
-        # Kategoriyalar bo'yicha
-        kat_chiqim: dict = {}
+        kat: dict = {}
         for r in rows:
             if len(r) > 3 and r[3] and float(r[3]) < 0:
                 k = r[2] if len(r) > 2 else "Boshqa"
-                kat_chiqim[k] = kat_chiqim.get(k, 0) + abs(float(r[3]))
-        if kat_chiqim:
+                kat[k] = kat.get(k, 0) + abs(float(r[3]))
+        if kat:
             lines.append("\n<b>Chiqimlar:</b>")
-            for k, s in sorted(kat_chiqim.items(), key=lambda x: -x[1]):
+            for k, s in sorted(kat.items(), key=lambda x: -x[1]):
                 lines.append(f"  {k}: {s:,.0f} so'm")
         await call.message.answer("\n".join(lines), parse_mode="HTML")
     except Exception as e:
@@ -513,15 +508,14 @@ async def hisobot_oy(call: CallbackQuery):
         lines.append(f"📊 Farq: <b>{kirim+chiqim:,.0f} so'm</b>")
         lines.append(f"\n{qoldiq_emoji(qoldiq)} <b>Joriy qoldiq: {qoldiq:,.0f} so'm</b>")
         lines.append(f"📝 Operatsiyalar: {len(rows)} ta")
-
-        kat_chiqim: dict = {}
+        kat: dict = {}
         for r in rows:
             if len(r) > 3 and r[3] and float(r[3]) < 0:
                 k = r[2] if len(r) > 2 else "Boshqa"
-                kat_chiqim[k] = kat_chiqim.get(k, 0) + abs(float(r[3]))
-        if kat_chiqim:
+                kat[k] = kat.get(k, 0) + abs(float(r[3]))
+        if kat:
             lines.append("\n<b>Chiqimlar bo'yicha:</b>")
-            for k, s in sorted(kat_chiqim.items(), key=lambda x: -x[1]):
+            for k, s in sorted(kat.items(), key=lambda x: -x[1]):
                 foiz = s / abs(chiqim) * 100 if chiqim else 0
                 lines.append(f"  {k}: {s:,.0f} so'm ({foiz:.1f}%)")
         await call.message.answer("\n".join(lines), parse_mode="HTML")
